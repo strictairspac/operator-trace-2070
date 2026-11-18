@@ -29,7 +29,7 @@ docker compose exec -T backend python -m scripts.seed_demo
 3. 09:10 新建 `shift-20261117` 数据集，备注 `daily-readings-20261117.json`。
 4. 09:15 保存高于50度→按sensor_id连接→按zone平均的计划。
 5. 09:20 提交 `shift-20261117`，观察worker排队到完成。
-6. 09:25 逐算子复查输入/输出行数与结果预览。
+6. 09:25 逐算子复查输入/输出行数与结果预览，点开输出分组翻查计入的 readings/sensors 原始行号。
 7. 09:30 导出 `trace-<id>.json`，viewer只读验证。
 8. 10:00 admin 查看审计。
 
@@ -39,6 +39,9 @@ seed三账号、三个数据集（240行日班、空数据、重复右键）、�
 这是教学内核模型，不是PostgreSQL执行器剖面。PostgreSQL真实保存业务元数据；Python worker真实计算表扫描、数值/相等筛选、构建哈希桶与内连接、Decimal累积分组。右表重复键保留倍数，空集合输出空集合。分组avg/sum保留6位小数，输出按规范JSON排序，SHA-256使用排序key紧凑JSON UTF-8；相同输入和计划结果摘要相同。每步输出输入/输出行数、耗时、明细、前5行与checksum。scan 的 input_rows=0 表示从源读取，detail.scanned_rows为扫描源行数；row_visits是扫描/过滤/哈希构建与探测/聚合各步逻辑行访问总和，不代表物理I/O。
 
 DSL最多6步，首步仅scan readings；filter eq/gte/lte；hash_join仅readings.sensor_id=sensors.sensor_id且最多一次；group仅value的count/sum/avg。禁止eval、任意代码和任意SQL。最多100传感器、2000采样、10000连接输出行；超限失败，不保存部分结果。JSON非法、字段错误、非法算子、孤立引用、重复名有可恢复错误。任务使用Redis简单单消费者，进程崩溃后的running任务不自动重试，保留供人工复查后新建任务。
+
+## 来源追溯
+剖面页可点开任意输出分组，翻查实际计入的 readings/sensors 原始行号（1起，按该次执行的输入快照编号；同键同值的重复行各算一份）。追溯证据随执行一次性生成，与结果同一事务写入：都落库才标completed，写失败标failed；此后源表改动、算子规则升级都仍按该次执行解释。证据容量上限64KB规范JSON：装得下全部行号为full；超出降级为逐组精确计数counts，再超出仅留全局汇总summary；任一级来源都完整扫描、计数精确。翻页是对库存证据的游标分页，不重跑计划；中断后按游标恢复到原位置，重试行号与顺序不变。追溯上线前的旧剖面evidence为NULL，照常打开并标明缺少来源。
 
 ## 技术、目录与本地开发
 Python3.11 / FastAPI / SQLAlchemy / psycopg / Redis / PostgreSQL16；原生 HTML/CSS/JS ES modules / nginx1.27。五服务frontend/backend/worker/db/redis均健康探针，命名卷数据库/Redis/共享产物。DB/Redis健康后启动backend，backend健康后启worker/frontend。
